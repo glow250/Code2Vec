@@ -36,6 +36,10 @@ public class App {
 		}
 	}
 
+	public static void test(){
+		System.out.println("Conencted woo");
+	}
+
 	private static void extractDir() {
 		ThreadPoolExecutor executor = (ThreadPoolExecutor) Executors.newFixedThreadPool(s_CommandLineValues.NumThreads);
 		LinkedList<ExtractFeaturesTask> tasks = new LinkedList<>();

@@ -15,6 +15,9 @@ public class CommandLineValues {
 	@Option(name = "--dir", required = false, forbids = "--file")
 	public String Dir = null;
 
+	@Option(name = "--train", required = false)
+	public String Train = null;
+
 	@Option(name = "--max_path_length", required = true)
 	public int MaxPathLength;
 

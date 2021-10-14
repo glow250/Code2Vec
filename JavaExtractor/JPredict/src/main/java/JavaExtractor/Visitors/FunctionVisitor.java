@@ -2,10 +2,12 @@ package JavaExtractor.Visitors;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
 import com.github.javaparser.ast.Node;
 import com.github.javaparser.ast.body.MethodDeclaration;
+import com.github.javaparser.ast.stmt.Statement;
 import com.github.javaparser.ast.visitor.VoidVisitorAdapter;
 
 import JavaExtractor.Common.Common;
@@ -34,8 +36,12 @@ public class FunctionVisitor extends VoidVisitorAdapter<Object> {
 			splitName = splitNameParts.stream().collect(Collectors.joining(Common.internalSeparator));
 		}
 
-		if (node.getBody() != null) {
-			m_Methods.add(new MethodContent(leaves, splitName, getMethodLength(node.getBody().toString())));
+		if(node.getBody() != null){
+			if (node.getBody().getStmts() != null) {
+				if(node.getBody().getStmts().size() != 0){
+					m_Methods.add(new MethodContent(leaves, splitName, getMethodLength(node.getBody().toString())));
+				}
+			}
 		}
 	}
 

@@ -6,6 +6,10 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.io.*;
+import java.net.Socket;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.apache.commons.lang3.StringUtils;
 
@@ -33,6 +37,23 @@ public class ExtractFeaturesTask implements Callable<Void> {
 		return null;
 	}
 
+	public void sendData(ArrayList<String> messages) throws IOException{
+		// need host and port, we want to connect to the ServerSocket at port 7777
+		Socket socket = new Socket("localhost", 7777);
+		System.out.println("Connected!");
+
+		// get the output stream from the socket.
+		OutputStream outputStream = socket.getOutputStream();
+		// create an object output stream from the output stream so we can send an object through it
+		ObjectOutputStream objectOutputStream = new ObjectOutputStream(outputStream);
+
+		System.out.println("Sending messages to the ServerSocket");
+		objectOutputStream.writeObject(messages);
+
+		System.out.println("Closing socket and terminating program.");
+		socket.close();
+	}
+
 	public void processFile() {
 		ArrayList<ProgramFeatures> features;
 		try {
@@ -45,10 +66,38 @@ public class ExtractFeaturesTask implements Callable<Void> {
 			return;
 		}
 
-		String toPrint = featuresToString(features);
-		if (toPrint.length() > 0) {
-			System.out.println(toPrint);
+		for( ProgramFeatures pf : features){
+			try{
+				System.out.println(this.filePath.toAbsolutePath().toString().split("raw_java")[1] + ","+pf.getName() +","+ pf.getFeatures().size());
+			}catch(Exception e){
+				System.out.println(pf.getName() +","+ pf.getFeatures().size()+","+this.filePath.toAbsolutePath());
+			}
 		}
+
+//		String toPrint = featuresToString(features);
+//		if (toPrint.length() > 0) {
+//            System.out.println(toPrint);
+//		}
+	}
+
+	public ArrayList<MethodAST>  getMethodsAndAsts() {
+		ArrayList<ProgramFeatures> features;
+		try {
+			features = extractSingleFile();
+		} catch (ParseException | IOException e) {
+			e.printStackTrace();
+			return new ArrayList<>();
+		}
+		if (features == null) {
+			return new ArrayList<>();
+		}
+		ArrayList<MethodAST> filesMethods = new ArrayList<>();
+
+		for( ProgramFeatures pf : features){
+			filesMethods.add(new MethodAST(pf.getName(), pf.getFeatures().size()));
+		}
+
+		return(filesMethods);
 	}
 
 	public ArrayList<ProgramFeatures> extractSingleFile() throws ParseException, IOException {

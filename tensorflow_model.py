@@ -4,13 +4,13 @@ import time
 from typing import Dict, Optional, List, Iterable
 from collections import Counter
 from functools import partial
+import csv
 
 from path_context_reader import PathContextReader, ModelInputTensorsFormer, ReaderInputTensors, EstimatorAction
 from common import common
 from vocabularies import VocabType
 from config import Config
 from model_base import Code2VecModelBase, ModelEvaluationResults, ModelPredictionResults
-
 
 tf.compat.v1.disable_eager_execution()
 
@@ -122,7 +122,7 @@ class Code2VecModel(Code2VecModelBase):
             input_tensors = input_iterator.get_next()
 
             self.eval_top_words_op, self.eval_top_values_op, self.eval_original_names_op, _, _, _, _, \
-                self.eval_code_vectors = self._build_tf_test_graph(input_tensors)
+            self.eval_code_vectors = self._build_tf_test_graph(input_tensors)
             if self.saver is None:
                 self.saver = tf.compat.v1.train.Saver()
 
@@ -135,7 +135,16 @@ class Code2VecModel(Code2VecModelBase):
                 self.saver.save(self.sess, release_name)
                 return None  # FIXME: why do we return none here?
 
-        with open('log.txt', 'w') as log_output_file:
+        location = str.split(self.config.model_load_dir, '/')
+        location = location[len(location) - 1]
+
+        with open('log.txt', 'w') as log_output_file, open(self.config.model_load_dir + '/' + location + '_c2v_log.csv',
+                                                           'w') as log_csv_file:
+            csv_writer = csv.writer(log_csv_file)
+            row = ["Original Name", "Rank", "Prediction 1", "Prediction 2", "Prediction 3", "Prediction 4",
+                   "Prediction 5", "Prediction 6", "Prediction 7", "Prediction 8", "Prediction 9", "Prediction 10",
+                   "Original Subtokens ", "Predicted Subtokens", "True Postive", "False Positive", "False Negative"]
+            csv_writer.writerow(row)
             if self.config.EXPORT_CODE_VECTORS:
                 code_vectors_file = open(self.config.TEST_DATA_PATH + '.vectors', 'w')
             total_predictions = 0
@@ -169,7 +178,7 @@ class Code2VecModel(Code2VecModelBase):
 
                     self._log_predictions_during_evaluation(zip(original_names, top_words), log_output_file)
                     topk_accuracy_evaluation_metric.update_batch(zip(original_names, top_words))
-                    subtokens_evaluation_metric.update_batch(zip(original_names, top_words))
+                    subtokens_evaluation_metric.update_batch(zip(original_names, top_words), csv_writer, self)
 
                     total_predictions += len(original_names)
                     total_prediction_batches += 1
@@ -185,7 +194,7 @@ class Code2VecModel(Code2VecModelBase):
             log_output_file.write(str(topk_accuracy_evaluation_metric.topk_correct_predictions) + '\n')
         if self.config.EXPORT_CODE_VECTORS:
             code_vectors_file.close()
-        
+
         elapsed = int(time.time() - eval_start_time)
         self.log("Evaluation time: %sH:%sM:%sS" % ((elapsed // 60 // 60), (elapsed // 60) % 60, elapsed % 60))
         return ModelEvaluationResults(
@@ -206,18 +215,21 @@ class Code2VecModel(Code2VecModelBase):
             tokens_vocab = tf.compat.v1.get_variable(
                 self.vocab_type_to_tf_variable_name_mapping[VocabType.Token],
                 shape=(self.vocabs.token_vocab.size, self.config.TOKEN_EMBEDDINGS_SIZE), dtype=tf.float32,
-                initializer=tf.compat.v1.initializers.variance_scaling(scale=1.0, mode='fan_out', distribution="uniform"))
+                initializer=tf.compat.v1.initializers.variance_scaling(scale=1.0, mode='fan_out',
+                                                                       distribution="uniform"))
             targets_vocab = tf.compat.v1.get_variable(
                 self.vocab_type_to_tf_variable_name_mapping[VocabType.Target],
                 shape=(self.vocabs.target_vocab.size, self.config.TARGET_EMBEDDINGS_SIZE), dtype=tf.float32,
-                initializer=tf.compat.v1.initializers.variance_scaling(scale=1.0, mode='fan_out', distribution="uniform"))
+                initializer=tf.compat.v1.initializers.variance_scaling(scale=1.0, mode='fan_out',
+                                                                       distribution="uniform"))
             attention_param = tf.compat.v1.get_variable(
                 'ATTENTION',
                 shape=(self.config.CODE_VECTOR_SIZE, 1), dtype=tf.float32)
             paths_vocab = tf.compat.v1.get_variable(
                 self.vocab_type_to_tf_variable_name_mapping[VocabType.Path],
                 shape=(self.vocabs.path_vocab.size, self.config.PATH_EMBEDDINGS_SIZE), dtype=tf.float32,
-                initializer=tf.compat.v1.initializers.variance_scaling(scale=1.0, mode='fan_out', distribution="uniform"))
+                initializer=tf.compat.v1.initializers.variance_scaling(scale=1.0, mode='fan_out',
+                                                                       distribution="uniform"))
 
             code_vectors, _ = self._calculate_weighted_contexts(
                 tokens_vocab, paths_vocab, attention_param, input_tensors.path_source_token_indices,
@@ -243,7 +255,7 @@ class Code2VecModel(Code2VecModelBase):
                                   axis=-1)  # (batch, max_contexts, dim * 3)
 
         if not is_evaluating:
-            context_embed = tf.nn.dropout(context_embed, rate=1-self.config.DROPOUT_KEEP_RATE)
+            context_embed = tf.nn.dropout(context_embed, rate=1 - self.config.DROPOUT_KEEP_RATE)
 
         flat_embed = tf.reshape(context_embed, [-1, self.config.context_vector_size])  # (batch * max_contexts, dim * 3)
         transform_param = tf.compat.v1.get_variable(
@@ -327,12 +339,12 @@ class Code2VecModel(Code2VecModelBase):
 
         prediction_results: List[ModelPredictionResults] = []
         for line in predict_data_lines:
-            batch_top_words, batch_top_scores, batch_original_name, batch_attention_weights, batch_path_source_strings,\
-                batch_path_strings, batch_path_target_strings, batch_code_vectors = self.sess.run(
-                    [self.predict_top_words_op, self.predict_top_values_op, self.predict_original_names_op,
-                     self.attention_weights_op, self.predict_source_string, self.predict_path_string,
-                     self.predict_path_target_string, self.predict_code_vectors],
-                    feed_dict={self.predict_placeholder: line})
+            batch_top_words, batch_top_scores, batch_original_name, batch_attention_weights, batch_path_source_strings, \
+            batch_path_strings, batch_path_target_strings, batch_code_vectors = self.sess.run(
+                [self.predict_top_words_op, self.predict_top_values_op, self.predict_original_names_op,
+                 self.attention_weights_op, self.predict_source_string, self.predict_path_string,
+                 self.predict_path_target_string, self.predict_code_vectors],
+                feed_dict={self.predict_placeholder: line})
             # shapes:
             #   batch_top_words, top_scores: (batch, top_k)
             #   batch_original_name: (batch, )
@@ -379,7 +391,7 @@ class Code2VecModel(Code2VecModelBase):
     def _get_vocab_embedding_as_np_array(self, vocab_type: VocabType) -> np.ndarray:
         assert vocab_type in VocabType
         vocab_tf_variable_name = self.vocab_type_to_tf_variable_name_mapping[vocab_type]
-        
+
         if self.eval_reader is None:
             self.eval_reader = PathContextReader(vocabs=self.vocabs,
                                                  model_input_tensors_former=_TFEvaluateModelInputTensorsFormer(),
@@ -397,8 +409,8 @@ class Code2VecModel(Code2VecModelBase):
         with tf.compat.v1.variable_scope('model', reuse=True):
             embeddings = tf.compat.v1.get_variable(vocab_tf_variable_name, shape=shape)
         self.saver = tf.compat.v1.train.Saver()
-        self._initialize_session_variables() 
-        self._load_inner_model(self.sess) 
+        self._initialize_session_variables()
+        self._load_inner_model(self.sess)
         vocab_embedding_matrix = self.sess.run(embeddings)
         return vocab_embedding_matrix
 
@@ -410,8 +422,8 @@ class Code2VecModel(Code2VecModelBase):
 
     def _log_predictions_during_evaluation(self, results, output_file):
         for original_name, top_predicted_words in results:
-            found_match = common.get_first_match_word_from_top_predictions(
-                self.vocabs.target_vocab.special_words, original_name, top_predicted_words)
+            found_match = common.get_first_match_word_from_top_predictions(self.vocabs.target_vocab.special_words,
+                                                                           original_name, top_predicted_words)
             if found_match is not None:
                 prediction_idx, predicted_word = found_match
                 if prediction_idx == 0:
@@ -455,18 +467,34 @@ class SubtokensEvaluationMetric:
         self.nr_predictions: int = 0
         self.filter_impossible_names_fn = filter_impossible_names_fn
 
-    def update_batch(self, results):
+    def update_batch(self, results, csv_writer, otherself):
         for original_name, top_words in results:
             prediction = self.filter_impossible_names_fn(top_words)[0]
             original_subtokens = Counter(common.get_subtokens(original_name))
             predicted_subtokens = Counter(common.get_subtokens(prediction))
             self.nr_true_positives += sum(count for element, count in predicted_subtokens.items()
                                           if element in original_subtokens)
+            tp = sum(count for element, count in predicted_subtokens.items()
+                     if element in original_subtokens)
             self.nr_false_positives += sum(count for element, count in predicted_subtokens.items()
                                            if element not in original_subtokens)
+            fp = sum(count for element, count in predicted_subtokens.items()
+                     if element not in original_subtokens)
             self.nr_false_negatives += sum(count for element, count in original_subtokens.items()
                                            if element not in predicted_subtokens)
+            fn = sum(count for element, count in original_subtokens.items()
+                     if element not in predicted_subtokens)
             self.nr_predictions += 1
+
+            found_match = common.get_first_match_word_from_top_predictions(otherself.vocabs.target_vocab.special_words,
+                                                                           original_name, top_words)
+            if found_match is not None:
+                prediction_idx, predicted_word = found_match
+                row = [original_name] + [prediction_idx] + top_words
+            else:
+                row = [original_name] + ['11'] + top_words
+            row = row + [len(common.get_subtokens(original_name)), len(common.get_subtokens(prediction)), tp, fp, fn]
+            csv_writer.writerow(row)
 
     @property
     def true_positive(self):

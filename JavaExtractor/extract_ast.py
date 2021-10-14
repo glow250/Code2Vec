@@ -25,7 +25,7 @@ def ParallelExtractDir(args, dir):
 
 
 def ExtractFeaturesForDir(args, dir, prefix):
-    command = ['java', '-jar', "JavaExtractor.jar",
+    command = ['java', '-jar', "JavaExtractor_ASTPath.jar",
                '--max_path_length', str(args.max_path_length), '--max_path_width', str(args.max_path_width),
                '--dir', dir, '--num_threads', str(args.num_threads)]
 
